@@ -21,6 +21,7 @@ import re
 from urllib.parse import urljoin
 import time
 from urllib.parse import quote
+from langchain.chat_models import ChatOpenAI
 
 def extract_email_from_text(text: str) -> List[str]:
     """
@@ -422,4 +423,39 @@ def post_to_social_media(press_release: str) -> Dict[str, bool]:
             'twitter': False,
             'linkedin': False,
             'facebook': False
-        } 
+        }
+
+def extract_topics(text: str) -> str:
+    """
+    Extract key topics from the press release text.
+    
+    Args:
+        text (str): The press release text
+        
+    Returns:
+        str: Key topics extracted from the text
+    """
+    try:
+        # Use Groq to extract key topics
+        prompt = f"""Analizza il seguente comunicato stampa e estrai i topic principali:
+
+{text}
+
+Per favore fornisci i topic principali in italiano, separati da virgole.
+Non includere testo aggiuntivo o spiegazioni."""
+
+        response = groq_client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+            max_tokens=100
+        )
+        
+        # Get the response content and clean it
+        topics = response.choices[0].message.content.strip()
+        return topics
+        
+    except Exception as e:
+        print(f"Error extracting topics: {str(e)}")
+        # Fallback: return the first sentence as topic
+        return text.split('.')[0] if text else "" 

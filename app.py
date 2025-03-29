@@ -22,7 +22,12 @@ from groq import Groq
 from dotenv import load_dotenv
 import json
 import time
-from utils import search_recipients, send_email, post_to_social_media
+from utils import (
+    search_recipients,
+    send_email,
+    post_to_social_media,
+    extract_topics
+)
 from cloud_storage import CloudStorage
 
 # Load environment variables from .env file
