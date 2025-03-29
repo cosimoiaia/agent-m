@@ -96,67 +96,21 @@ def press_release_writer(state: AgentState) -> AgentState:
         raise Exception(f"Error generating press release: {str(e)}")
 
 def recipient_search(state: AgentState) -> AgentState:
-    """Search for relevant media contacts in the Italian market."""
+    """Search for relevant media contacts in the Italian market using web search."""
     try:
-        # Use Groq to search for Italian media contacts
-        prompt = f"""Cerca contatti dei media italiani pertinenti per il seguente comunicato stampa:
-
-{state["press_release"]}
-
-Per favore fornisci una lista di contatti dei media italiani che potrebbero essere interessati a questo comunicato stampa.
-Per ogni contatto, includi:
-- Nome completo
-- Ruolo
-- Email
-- Testata giornalistica
-- Breve descrizione del loro focus editoriale
-
-IMPORTANTE: La risposta DEVE essere in formato JSON valido con la seguente struttura esatta:
-{{
-    "recipients": [
-        {{
-            "name": "Nome Completo",
-            "role": "Ruolo",
-            "email": "email@example.com",
-            "publication": "Nome Testata",
-            "focus": "Descrizione del focus editoriale"
-        }}
-    ]
-}}
-
-Non includere testo aggiuntivo o spiegazioni. Fornisci SOLO il JSON."""
-
-        response = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=1000
-        )
+        # Extract key topics from the press release
+        topics = extract_topics(state["press_release"])
         
-        # Get the response content and clean it
-        content = response.choices[0].message.content.strip()
+        # Search for Italian media contacts using web search
+        recipients = search_recipients(topics, country="it")
         
-        # Try to find JSON in the response if there's additional text
-        try:
-            # First try to parse the entire response
-            result = json.loads(content)
-        except json.JSONDecodeError:
-            # If that fails, try to find JSON-like content between curly braces
-            import re
-            json_match = re.search(r'\{.*\}', content, re.DOTALL)
-            if json_match:
-                try:
-                    result = json.loads(json_match.group())
-                except json.JSONDecodeError:
-                    raise Exception("Impossibile analizzare la risposta JSON")
-            else:
-                raise Exception("Nessun JSON valido trovato nella risposta")
-        
-        if not isinstance(result, dict) or "recipients" not in result:
-            raise Exception("Formato JSON non valido: manca il campo 'recipients'")
+        if not recipients:
+            st.error("Nessun destinatario trovato. Prova con un argomento diverso o verifica la tua News API key.")
+            return state
             
-        state["recipients"] = result["recipients"]
+        state["recipients"] = recipients
         state["current_step"] = "recipients"
+        state["approved"] = False  # Require approval
         
     except Exception as e:
         st.error(f"Errore nella ricerca dei destinatari: {str(e)}")

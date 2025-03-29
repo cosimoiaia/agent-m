@@ -20,6 +20,7 @@ import facebook
 import re
 from urllib.parse import urljoin
 import time
+from urllib.parse import quote
 
 def extract_email_from_text(text: str) -> List[str]:
     """
@@ -69,271 +70,109 @@ def find_contact_page(url: str) -> str:
     except:
         return url
 
-def search_recipients(topic: str) -> List[Dict[str, str]]:
+def search_recipients(topic: str, country: str = "it") -> List[Dict[str, str]]:
     """
-    Search for relevant journalists, editors, and bloggers based on the topic using News API.
+    Search for relevant recipients based on the topic using News API and web search.
     
     Args:
-        topic (str): The topic to search for relevant contacts
+        topic (str): The topic to search for
+        country (str): The country code to focus the search on (default: "it" for Italy)
         
     Returns:
-        List[Dict[str, str]]: List of dictionaries containing recipient information
-        
-    The function:
-    1. Uses News API to find relevant articles and sources
-    2. Visits found websites
-    3. Extracts contact information
-    4. Validates and deduplicates results
+        List[Dict[str, str]]: List of recipients with their details
     """
     recipients = []
     
-    # International platforms and publications by region
-    platforms = {
-        "technology": [
-            # Global Tech
-            "techcrunch.com",
-            "venturebeat.com",
-            "wired.com",
-            "theverge.com",
-            "zdnet.com",
-            "arstechnica.com",
-            # Europe
-            "euractiv.com",
-            "tech.eu",
-            "sifted.eu",
-            # Asia
-            "techinasia.com",
-            "kr-asia.com",
-            "36kr.com",
-            # Latin America
-            "techcrunch.com/latam",
-            "startups.com.br"
-        ],
-        "business": [
-            # Global Business
-            "bloomberg.com",
-            "reuters.com",
-            "forbes.com",
-            "businesswire.com",
-            "prnewswire.com",
-            # Europe
-            "ft.com",
-            "economist.com",
-            "handelsblatt.com",
-            # Asia
-            "nikkei.com",
-            "scmp.com",
-            "mint.in",
-            # Latin America
-            "valor.com.br",
-            "elmercurio.com"
-        ],
-        "science": [
-            # Global Science
-            "nature.com",
-            "science.org",
-            "scientificamerican.com",
-            "newscientist.com",
-            # Europe
-            "sciencebusiness.net",
-            "researchprofessional.com",
-            # Asia
-            "natureasia.com",
-            "science.org.cn",
-            # Latin America
-            "scielo.org",
-            "cienciahoje.org.br"
-        ],
-        "health": [
-            # Global Health
-            "medscape.com",
-            "healthline.com",
-            "webmd.com",
-            "medicalnewstoday.com",
-            # Europe
-            "bmj.com",
-            "thelancet.com",
-            # Asia
-            "healthcareasia.org",
-            "healthcare.digital",
-            # Latin America
-            "panorama.sanidad.gob.es",
-            "saude.gov.br"
-        ],
-        "default": [
-            # Global News
-            "medium.com",
-            "wordpress.com",
-            "blogspot.com",
-            "substack.com",
-            "news.google.com",
-            # Europe
-            "euronews.com",
-            "politico.eu",
-            # Asia
-            "asia.nikkei.com",
-            "straitstimes.com",
-            # Latin America
-            "mercopress.com",
-            "infobae.com"
-        ]
-    }
-    
-    # Determine relevant platforms based on topic keywords
-    relevant_platforms = set()
-    topic_lower = topic.lower()
-    for category, platform_list in platforms.items():
-        if category in topic_lower:
-            relevant_platforms.update(platform_list)
-    if not relevant_platforms:
-        relevant_platforms.update(platforms["default"])
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    }
-    
     try:
-        # Use News API to find relevant articles and sources
+        # First try News API
         news_api_key = os.getenv("NEWS_API_KEY")
-        if not news_api_key:
-            print("Warning: NEWS_API_KEY not found in environment variables. Using fallback search method.")
-            return search_recipients_fallback(topic, relevant_platforms)
+        if news_api_key:
+            url = f"https://newsapi.org/v2/everything"
+            params = {
+                "q": topic,
+                "language": "it",
+                "sortBy": "relevancy",
+                "apiKey": news_api_key
+            }
             
-        # Make request to News API
-        news_api_url = f"https://newsapi.org/v2/everything"
-        params = {
-            'q': topic,
-            'language': 'en',
-            'sortBy': 'relevancy',
-            'pageSize': 20,
-            'apiKey': news_api_key
-        }
-        
-        response = requests.get(news_api_url, params=params, headers=headers)
-        if response.status_code != 200:
-            print(f"Warning: News API request failed with status code {response.status_code}. Using fallback search method.")
-            return search_recipients_fallback(topic, relevant_platforms)
-            
-        data = response.json()
-        if data.get('status') != 'ok' or not data.get('articles'):
-            print("Warning: No articles found from News API. Using fallback search method.")
-            return search_recipients_fallback(topic, relevant_platforms)
-            
-        # Process articles and extract contact information
-        for article in data['articles']:
-            source_url = article.get('source', {}).get('url', '')
-            if not source_url:
-                continue
-                
-            # Extract domain from URL
-            domain = source_url.split('//')[-1].split('/')[0]
-            if domain not in relevant_platforms:
-                continue
-                
-            try:
-                # Find contact page
-                contact_url = find_contact_page(source_url)
-                if not contact_url:
-                    continue
-                    
-                # Get contact page content
-                contact_response = requests.get(contact_url, headers=headers, timeout=10)
-                if contact_response.status_code != 200:
-                    continue
-                    
-                soup = BeautifulSoup(contact_response.text, 'html.parser')
-                
-                # Extract emails and names
-                emails = extract_email_from_text(contact_response.text)
-                if not emails:
-                    continue
-                    
-                # Look for names near email addresses
-                for email in emails:
-                    # Find the closest text node containing the email
-                    email_node = soup.find(string=re.compile(email))
-                    if not email_node:
-                        continue
-                        
-                    # Look for name in surrounding text
-                    name = None
-                    parent = email_node.parent
-                    if parent:
-                        # Try to find name in parent element
-                        name_text = parent.get_text().strip()
-                        if name_text and name_text != email:
-                            name = name_text
-                        else:
-                            # Try to find name in sibling elements
-                            for sibling in parent.find_previous_siblings():
-                                name_text = sibling.get_text().strip()
-                                if name_text and name_text != email:
-                                    name = name_text
-                                    break
-                    
-                    if name:
-                        # Extract role if available
-                        role = ""
-                        role_patterns = [
-                            r'(Senior|Junior|Associate|Lead|Chief|Editor|Writer|Reporter|Journalist|Author)',
-                            r'(Technology|Business|Science|Health|Politics|Sports|Arts|Culture)'
-                        ]
-                        
-                        for pattern in role_patterns:
-                            roles = re.findall(pattern, name)
-                            if roles:
-                                role = roles[0]
-                                break
-                        
-                        # Determine region based on domain
-                        region = "global"
-                        if any(domain.endswith(tld) for tld in [".eu", ".de", ".fr", ".uk"]):
-                            region = "europe"
-                        elif any(domain.endswith(tld) for tld in [".cn", ".jp", ".kr", ".in", ".sg"]):
-                            region = "asia"
-                        elif any(domain.endswith(tld) for tld in [".br", ".ar", ".cl", ".es"]):
-                            region = "latin_america"
-                        
+            response = requests.get(url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                for article in data.get("articles", []):
+                    if article.get("author"):
                         recipients.append({
-                            'name': name,
-                            'email': email,
-                            'source': source_url,
-                            'platform': domain,
-                            'article_url': article.get('url', ''),
-                            'region': region,
-                            'role': role
+                            "name": article["author"],
+                            "role": "Giornalista",
+                            "email": "",  # News API doesn't provide email
+                            "publication": article.get("source", {}).get("name", ""),
+                            "focus": f"Articoli su {topic}"
                         })
-                
-            except Exception as e:
-                print(f"Error processing {source_url}: {str(e)}")
-                continue
-                
-        # If no recipients found through News API, try fallback method
+        
+        # If no results from News API or no API key, use web search
         if not recipients:
-            print("No recipients found through News API. Using fallback search method.")
-            return search_recipients_fallback(topic, relevant_platforms)
+            # Search for Italian media contacts
+            search_query = f"{topic} giornalisti italiani contatti"
+            search_url = f"https://www.google.com/search?q={quote(search_query)}"
             
-        # Remove duplicates based on email and sort by relevance
-        unique_recipients = []
-        seen_emails = set()
-        for recipient in recipients:
-            if recipient['email'] not in seen_emails:
-                seen_emails.add(recipient['email'])
-                unique_recipients.append(recipient)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            
+            response = requests.get(search_url, headers=headers)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, "html.parser")
+                
+                # Look for contact information in search results
+                for result in soup.find_all("div", class_="g"):
+                    title = result.find("h3")
+                    if title:
+                        title_text = title.get_text()
+                        # Check if it's a media contact page
+                        if any(keyword in title_text.lower() for keyword in ["giornalista", "redattore", "editore", "contatti", "rubrica"]):
+                            snippet = result.find("div", class_="VwiC3b")
+                            if snippet:
+                                snippet_text = snippet.get_text()
+                                # Extract potential contact information
+                                email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', snippet_text)
+                                if email_match:
+                                    recipients.append({
+                                        "name": title_text,
+                                        "role": "Giornalista",
+                                        "email": email_match.group(),
+                                        "publication": "Da determinare",
+                                        "focus": f"Articoli su {topic}"
+                                    })
         
-        # Sort recipients by relevance (region diversity, platform match, and role presence)
-        unique_recipients.sort(key=lambda x: (
-            x['platform'] != "unknown",  # Platform matches first
-            bool(x['role']),  # Has role second
-            x['name'] != "Unknown Author",  # Has name third
-            x['region'] != "global"  # Regional diversity fourth
-        ), reverse=True)
-        
-        return unique_recipients
+        # If still no results, try searching Italian media directories
+        if not recipients:
+            media_directories = [
+                "https://www.odg.it/elenco-giornalisti/",
+                "https://www.fnsi.it/elenco-giornalisti/"
+            ]
+            
+            for directory in media_directories:
+                try:
+                    response = requests.get(directory, headers=headers)
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.text, "html.parser")
+                        # Look for journalists in the directory
+                        for journalist in soup.find_all("div", class_=["giornalista", "member", "contact"]):
+                            name = journalist.find("h3") or journalist.find("strong")
+                            if name:
+                                recipients.append({
+                                    "name": name.get_text().strip(),
+                                    "role": "Giornalista",
+                                    "email": "",  # Would need to visit individual pages
+                                    "publication": "Da determinare",
+                                    "focus": f"Articoli su {topic}"
+                                })
+                except Exception as e:
+                    print(f"Error searching directory {directory}: {str(e)}")
         
     except Exception as e:
-        print(f"Error in search_recipients: {str(e)}")
-        return search_recipients_fallback(topic, relevant_platforms)
+        print(f"Error searching for recipients: {str(e)}")
+    
+    return recipients
 
 def search_recipients_fallback(topic: str, relevant_platforms: set) -> List[Dict[str, str]]:
     """

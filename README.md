@@ -5,7 +5,10 @@ An intelligent agent for generating and distributing press releases, built with 
 ## Features
 
 - Press release generation in Italian using Groq
-- Italian media contact discovery
+- Smart web search for Italian media contacts using multiple sources:
+  - News API with Italian language filter
+  - Google search with Italian-specific queries
+  - Italian media directories (ODG and FNSI)
 - Personalized email distribution
 - Social media posting
 - Cloud storage for all generated content
@@ -16,6 +19,7 @@ An intelligent agent for generating and distributing press releases, built with 
 
 - Python 3.8+
 - Groq API key
+- News API key (optional, for enhanced media contact search)
 - AWS credentials for S3 (optional, for cloud storage)
 - SMTP credentials for email sending (optional)
 
@@ -59,7 +63,7 @@ streamlit run app.py
    - Enter your press release topic
    - Review and approve the generated press release
    - Check recipients and email content
-   - Approve email sending
+   - Approva e Invia Email
    - Verify social media posting status
 
 ## Project Structure
@@ -82,7 +86,10 @@ agent-m/
 
 - The application requires explicit user approval for each process step
 - Press releases are generated in Italian and optimized for the Italian market
-- Recipient search is focused on Italian media contacts
+- Recipient search uses a multi-source approach to find Italian media contacts:
+  1. News API with Italian language filter
+  2. Google search with Italian-specific queries
+  3. Italian media directories (ODG and FNSI)
 - Cloud storage is optional and requires valid AWS credentials
 - Email sending is optional and requires valid SMTP credentials
 
