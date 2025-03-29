@@ -21,7 +21,17 @@ import re
 from urllib.parse import urljoin
 import time
 from urllib.parse import quote
-from langchain.chat_models import ChatOpenAI
+from groq import Groq
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Groq client    
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+GROQ_MODEL = os.getenv("GROQ_MODEL", "mixtral-8x7b-32768")
+GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
+
 
 def extract_email_from_text(text: str) -> List[str]:
     """
