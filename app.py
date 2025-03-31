@@ -17,7 +17,7 @@ Key features:
 import os
 import streamlit as st
 from langgraph.graph import Graph, StateGraph
-from typing import Dict, TypedDict, Annotated, Sequence
+from typing import Dict, TypedDict, Annotated, Sequence, Any, List
 from groq import Groq
 from dotenv import load_dotenv
 import json
@@ -29,19 +29,44 @@ from utils import (
     extract_topics
 )
 from cloud_storage import CloudStorage
+import logging
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('press_release_agent')
 
 # Load environment variables from .env file
 load_dotenv()
 
 # Initialize Groq client for text generation
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+logger.info("Initializing Groq client")
+try:
+    client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+    logger.info("Successfully initialized Groq client")
+except Exception as e:
+    logger.error(f"Failed to initialize Groq client: {str(e)}")
+    raise
 
 # Get Groq configuration from environment variables with defaults
 GROQ_MODEL = os.getenv("GROQ_MODEL", "mixtral-8x7b-32768")
 GROQ_TEMPERATURE = float(os.getenv("GROQ_TEMPERATURE", "0.7"))
 
 # Initialize cloud storage for persistent data
-cloud_storage = CloudStorage()
+logger.info("Initializing cloud storage")
+try:
+    cloud_storage = CloudStorage()
+    logger.info("Successfully initialized cloud storage")
+except Exception as e:
+    logger.error(f"Failed to initialize cloud storage: {str(e)}")
+    raise
 
 class AgentState(TypedDict):
     """
@@ -57,6 +82,7 @@ class AgentState(TypedDict):
         social_media_status (dict): Status of social media posting attempts
         current_step (str): Current step in the workflow
         approved (bool): Whether the current step has been approved by the user
+        topics (list): List of topics extracted from the press release
     """
     topic: str
     press_release: str
@@ -67,6 +93,7 @@ class AgentState(TypedDict):
     social_media_status: dict
     current_step: str
     approved: bool
+    topics: list
 
 def press_release_writer(state: AgentState) -> AgentState:
     """
@@ -81,6 +108,8 @@ def press_release_writer(state: AgentState) -> AgentState:
     Raises:
         Exception: If there is an error generating the press release
     """
+    logger.info(f"Generating press release for topic: {state['topic']}")
+    
     try:
         prompt = f"""Scrivi un comunicato stampa professionale in italiano su {state['topic']}. 
         Includi un titolo accattivante, un sottotitolo e un corpo del testo con citazioni e dettagli rilevanti.
@@ -94,20 +123,31 @@ def press_release_writer(state: AgentState) -> AgentState:
         )
         
         state["press_release"] = response.choices[0].message.content
-        state["current_step"] = "press_release"
+        state["current_step"] = "press_release"  # Changed back to press_release step
         state["approved"] = False  # Require approval
+        
+        # Store press release in cloud storage
+        content = json.dumps({
+            "topic": state["topic"],
+            "content": state["press_release"],
+            "timestamp": datetime.now().isoformat()
+        }).encode('utf-8')
+        
+        state["press_release_url"] = cloud_storage.store_press_release(state["topic"], content)
+        logger.info("Successfully stored press release in cloud storage")
+        
         return state
     except Exception as e:
-        raise Exception(f"Error generating press release: {str(e)}")
+        logger.error(f"Error generating press release: {str(e)}")
+        raise
 
 def recipient_search(state: AgentState) -> AgentState:
     """Search for relevant media contacts in the Italian market using web search."""
+    logger.info("Searching for potential recipients")
+    
     try:
-        # Extract key topics from the press release
-        topics = extract_topics(state["press_release"])
-        
-        # Search for Italian media contacts using web search
-        recipients = search_recipients(topics, country="it")
+        # Use the confirmed topics for search
+        recipients = search_recipients(state["topics"], country="it")
         
         if not recipients:
             st.error("Nessun destinatario trovato. Prova con un argomento diverso o verifica la tua News API key.")
@@ -117,8 +157,10 @@ def recipient_search(state: AgentState) -> AgentState:
         state["current_step"] = "recipients"
         state["approved"] = False  # Require approval
         
+        logger.info(f"Found {len(state['recipients'])} potential recipients")
+        
     except Exception as e:
-        st.error(f"Errore nella ricerca dei destinatari: {str(e)}")
+        logger.error(f"Errore nella ricerca dei destinatari: {str(e)}")
         state["recipients"] = []
     
     return state
@@ -137,6 +179,8 @@ def email_distributor(state: AgentState) -> AgentState:
     Raises:
         Exception: If there is an error during email distribution or storage
     """
+    logger.info("Starting email distribution")
+    
     try:
         if not state.get("press_release"):
             raise Exception("Press release content is missing")
@@ -184,8 +228,8 @@ def email_distributor(state: AgentState) -> AgentState:
         state["approved"] = False  # Reset approval for next step
         return state
     except Exception as e:
-        st.error(f"Error during email distribution: {str(e)}")
-        return state
+        logger.error(f"Error during email distribution: {str(e)}")
+        raise
 
 def social_media_poster(state: AgentState) -> AgentState:
     """
@@ -201,6 +245,8 @@ def social_media_poster(state: AgentState) -> AgentState:
     Raises:
         Exception: If there is an error posting to social media
     """
+    logger.info("Starting social media posting")
+    
     try:
         if not state.get("press_release"):
             raise Exception("Press release content is missing")
@@ -218,7 +264,8 @@ def social_media_poster(state: AgentState) -> AgentState:
         state["approved"] = False  # Reset approval for next step
         return state
     except Exception as e:
-        raise Exception(f"Error posting to social media: {str(e)}")
+        logger.error(f"Error posting to social media: {str(e)}")
+        raise
 
 # Create and configure the LangGraph workflow
 workflow = StateGraph(AgentState)
@@ -253,7 +300,8 @@ def main():
             "email_url": "",
             "social_media_status": {},
             "current_step": "initial",
-            "approved": False
+            "approved": False,
+            "topics": []  # Add topics to state
         }
 
     st.title("Agente di Distribuzione Comunicati Stampa")
@@ -271,13 +319,64 @@ def main():
         st.info("Per favore rivedi attentamente il comunicato stampa generato. Nessun contenuto verrà memorizzato o inviato fino alla tua approvazione.")
         
         press_release = st.text_area("Comunicato Stampa:", value=st.session_state.state["press_release"], height=300)
-        if st.button("Approva Comunicato Stampa"):
-            st.session_state.state["press_release"] = press_release
-            st.session_state.state["approved"] = True
-            st.session_state.state = app.invoke(st.session_state.state)
+        
+        # Confirmation buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Approva e Procedi ai Topic"):
+                st.session_state.state["press_release"] = press_release
+                st.session_state.state["approved"] = True
+                # Extract topics and move to topics step
+                topics = extract_topics(press_release)
+                st.session_state.state["topics"] = [t.strip() for t in topics.split(',')]
+                st.session_state.state["current_step"] = "topics"
+                st.experimental_rerun()
+        with col2:
+            if st.button("Rigenera Comunicato"):
+                st.session_state.state = press_release_writer(st.session_state.state)
+                st.experimental_rerun()
+
+    elif st.session_state.state["current_step"] == "topics":
+        st.subheader("Fase 2: Rivedi e Modifica i Topic")
+        st.info("Rivedi i topic estratti dal comunicato stampa. Puoi modificarli, aggiungerne di nuovi o rimuoverli prima di procedere.")
+        
+        # Show and allow editing of topics
+        edited_topics = []
+        for i, topic in enumerate(st.session_state.state["topics"]):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                edited_topic = st.text_input(f"Topic {i+1}:", value=topic)
+                edited_topics.append(edited_topic)
+            with col2:
+                if st.button("Rimuovi", key=f"remove_{i}"):
+                    edited_topics.pop(i)
+                    st.session_state.state["topics"] = edited_topics
+                    st.experimental_rerun()
+        
+        # Allow adding new topics
+        new_topic = st.text_input("Aggiungi nuovo topic:")
+        if st.button("Aggiungi") and new_topic:
+            edited_topics.append(new_topic)
+            st.session_state.state["topics"] = edited_topics
+            st.experimental_rerun()
+        
+        # Store final topics in state
+        st.session_state.state["topics"] = edited_topics
+        
+        # Confirmation buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Approva e Cerca Destinatari"):
+                st.session_state.state["approved"] = True
+                st.session_state.state = app.invoke(st.session_state.state)
+        with col2:
+            if st.button("Torna al Comunicato"):
+                st.session_state.state["current_step"] = "press_release"
+                st.session_state.state["approved"] = False
+                st.experimental_rerun()
 
     elif st.session_state.state["current_step"] == "recipients":
-        st.subheader("Fase 2: Rivedi Destinatari e Contenuto Email")
+        st.subheader("Fase 3: Rivedi Destinatari e Contenuto Email")
         st.info("Per favore rivedi attentamente i destinatari e il contenuto dell'email. Nessuna email verrà inviata fino alla tua approvazione.")
         
         # Show recipients
@@ -307,19 +406,20 @@ Cordiali saluti,
                 st.session_state.state["approved"] = True
                 st.session_state.state = app.invoke(st.session_state.state)
         with col2:
-            if st.button("Torna Indietro"):
-                st.session_state.state["current_step"] = "press_release"
+            if st.button("Torna ai Topic"):
+                st.session_state.state["current_step"] = "topics"
                 st.session_state.state["approved"] = False
+                st.experimental_rerun()
 
     elif st.session_state.state["current_step"] == "email":
-        st.subheader("Fase 3: Stato Distribuzione Email")
+        st.subheader("Fase 4: Stato Distribuzione Email")
         st.write(st.session_state.state["email_status"])
         if st.button("Procedi ai Social Media"):
             st.session_state.state["approved"] = True
             st.session_state.state = app.invoke(st.session_state.state)
 
     elif st.session_state.state["current_step"] == "social_media":
-        st.subheader("Fase 4: Stato Pubblicazione Social Media")
+        st.subheader("Fase 5: Stato Pubblicazione Social Media")
         st.write(st.session_state.state["social_media_status"])
         if st.button("Completa Processo"):
             st.session_state.state = {
@@ -331,8 +431,9 @@ Cordiali saluti,
                 "email_url": "",
                 "social_media_status": {},
                 "current_step": "initial",
-                "approved": False
+                "approved": False,
+                "topics": []
             }
 
 if __name__ == "__main__":
-    main() 
+    main()
