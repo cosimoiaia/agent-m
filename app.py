@@ -13,7 +13,7 @@ Key features:
 """
 
 import streamlit as st
-from agent import get_workflow, AgentState
+from agent import get_workflow, AgentState, generate_email_content
 from utils import extract_topics
 import logging
 
@@ -123,25 +123,15 @@ def main():
         st.subheader("Fase 3: Rivedi Destinatari e Contenuto Email")
         st.info("Per favore rivedi attentamente i destinatari e il contenuto dell'email. Nessuna email verrà inviata fino alla tua approvazione.")
         
-        # Show recipients
-        st.write("Destinatari:")
+        # Show recipients and their personalized email content
         for recipient in st.session_state.state["recipients"]:
-            st.write(f"- {recipient['name']} ({recipient['email']}) - {recipient.get('role', 'Ruolo non specificato')}")
-        
-        # Show email preview
-        st.write("Contenuto Email:")
-        email_content = f"""Oggetto: Comunicato Stampa: {st.session_state.state["topic"]}
-
-Gentile Redattore,
-
-La contatto per condividere un comunicato stampa che potrebbe interessare i suoi lettori.
-
-{st.session_state.state["press_release"]}
-
-Cordiali saluti,
-[Il Suo Nome]"""
-        
-        st.text_area("Email:", value=email_content, height=300, disabled=True)
+            with st.expander(f"📧 {recipient['name']} ({recipient['email']}) - {recipient.get('role', 'Ruolo non specificato')}"):
+                # Generate personalized email content
+                email_content = generate_email_content(recipient, st.session_state.state["press_release"])
+                
+                # Show email preview
+                st.write("Contenuto Email:")
+                st.text_area("Email:", value=email_content, height=200, disabled=True, key=f"email_{recipient['email']}")
         
         # Confirmation buttons
         col1, col2 = st.columns(2)

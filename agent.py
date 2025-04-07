@@ -170,6 +170,49 @@ def recipient_search(state: AgentState) -> AgentState:
     
     return state
 
+def generate_email_content(recipient: Dict[str, str], press_release: str) -> str:
+    """
+    Generate personalized email content in Italian for a specific recipient using Groq.
+    
+    Args:
+        recipient (Dict[str, str]): Dictionary containing recipient information
+        press_release (str): The press release content to be sent
+        
+    Returns:
+        str: Generated email content in Italian
+    """
+    logger.info(f"Generating email content for recipient: {recipient.get('name', 'Unknown')}")
+    
+    try:
+        prompt = f"""Scrivi un'email professionale in italiano per {recipient.get('name', 'il giornalista')} 
+        della testata {recipient.get('publication', '')}.
+        
+        L'email deve:
+        1. Essere personalizzata per il destinatario
+        2. Presentare il comunicato stampa in modo professionale
+        3. Includere una breve introduzione che spieghi perché il contenuto è rilevante
+        4. Mantenere un tono professionale ma cordiale
+        5. Concludere con una call-to-action appropriata
+        
+        Comunicato stampa:
+        {press_release}
+        
+        Genera solo il contenuto dell'email, senza oggetto o firma."""
+        
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=GROQ_TEMPERATURE,
+        )
+        
+        email_content = response.choices[0].message.content
+        logger.info(f"Successfully generated email content for {recipient.get('name', 'Unknown')}")
+        return email_content
+        
+    except Exception as e:
+        logger.error(f"Error generating email content: {str(e)}")
+        raise
+
 def email_distributor(state: AgentState) -> AgentState:
     """
     Store press release in cloud storage, send emails, and store email details.
@@ -208,9 +251,19 @@ def email_distributor(state: AgentState) -> AgentState:
             except Exception as e:
                 logger.warning(f"Failed to store press release in cloud storage: {str(e)}")
                 state["press_release_url"] = ""
-                
-            # Send emails and get status
-            email_status = send_email(state["recipients"], state["press_release"])
+            
+            # Generate personalized email content for each recipient
+            email_status = {}
+            for recipient in state["recipients"]:
+                try:
+                    email_content = generate_email_content(recipient, state["press_release"])
+                    # Send email with personalized content
+                    status = send_email(recipient, email_content)
+                    email_status[recipient.get("email", "unknown")] = status
+                except Exception as e:
+                    logger.error(f"Error sending email to {recipient.get('email', 'unknown')}: {str(e)}")
+                    email_status[recipient.get("email", "unknown")] = {"success": False, "error": str(e)}
+            
             state["email_status"] = email_status
             
             # Try to store email details in cloud storage
